@@ -16,24 +16,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Baixar repositório
       - name: Baixar arquivos
         uses: actions/checkout@v4
 
-      # 2. Configurar Java 17
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. Configurar Android SDK atualizado
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: ''
 
-      # 4. Instalar componentes necessários do Android
       - name: Instalar SDK Android 35
         run: |
           sdkmanager --install \
@@ -41,44 +37,66 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      # 5. Configurar Gradle
       - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      # 6. Extrair projeto
-      - name: Extrair projeto
+      # Procura ZIP ou utiliza os arquivos diretamente
+      - name: Preparar projeto
+        shell: bash
         run: |
           mkdir -p extracted
-          unzip -q ChestCounterV2.zip -d extracted
 
-      # 7. Encontrar pasta Android automaticamente
+          ZIP_FILE=""
+
+          if [ -f "ChestCounterV2.zip" ]; then
+            ZIP_FILE="ChestCounterV2.zip"
+          else
+            ZIP_FILE=$(find . -maxdepth 2 \
+              -type f -name '*.zip' \
+              -not -path './.git/*' \
+              -print -quit)
+          fi
+
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Extraindo: $ZIP_FILE"
+            unzip -q "$ZIP_FILE" -d extracted
+          else
+            echo "Nenhum ZIP encontrado."
+            echo "Procurando projeto diretamente no repositório."
+          fi
+
+      # Localiza settings.gradle automaticamente
       - name: Localizar projeto Android
         id: project
         shell: bash
         run: |
-          PROJECT_DIR=$(find extracted -type f \
+          SETTINGS_FILE=$(find . \
+            -type f \
             \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -print -quit | xargs -r dirname)
+            -not -path './.git/*' \
+            -not -path '*/.gradle/*' \
+            -print -quit)
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERRO: Projeto Android não encontrado!"
-            find extracted -maxdepth 5 -type f
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERRO: settings.gradle não encontrado!"
+            echo "Arquivos disponíveis:"
+            find . -maxdepth 4 -type f | head -200
             exit 1
           fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
 
           echo "Projeto encontrado: $PROJECT_DIR"
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      # 8. Compilar aplicativo
       - name: Compilar APK
         run: |
           gradle --no-daemon \
             -p "${{ steps.project.outputs.dir }}" \
             assembleDebug
 
-      # 9. Verificar APK
       - name: Verificar APK
         run: |
           APK="${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk"
@@ -88,10 +106,8 @@ jobs:
             exit 1
           fi
 
-          echo "APK gerado com sucesso:"
           ls -lh "$APK"
 
-      # 10. Disponibilizar APK
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
